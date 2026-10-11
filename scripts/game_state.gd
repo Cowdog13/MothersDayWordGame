@@ -12,16 +12,15 @@ const CARD_COUNTS := {
 }
 const POOL_SIZE := 10
 const BACKUP_SIZE := 15
-const MIN_WORDS := 1
-const MAX_WORDS := 8
+const NUM_WORDS := 3 ## words (starting cards) in play
 const DOUBLE_VALUE := 3 ## points a two-letter card is worth (instead of 2)
 
 static var _dictionary: Dictionary = {}
 
 var num_words := 0
-var scoring: Array = [] ## per word: Array of card codes, first = the scoring-area card
+var scoring: Array = [] ## per word: card codes in reading order (cards can be added to either end)
 var pools: Array = [] ## per word: Array of card codes, last = revealed top card
-var backup: Array = [] ## last = top card
+var backup: Array = [] ## all visible; any card can be played at any time
 var score := 0
 var words_made: Array = [] ## [{word, points}] for every successful play
 
@@ -59,13 +58,6 @@ static func stack_text(stack: Array) -> String:
 	return "".join(PackedStringArray(stack))
 
 
-static func max_words_for_deck() -> int:
-	var total := 0
-	for n in CARD_COUNTS.values():
-		total += n
-	return mini(MAX_WORDS, (total - BACKUP_SIZE) / (POOL_SIZE + 1))
-
-
 static func build_deck() -> Array:
 	var deck: Array = []
 	for code in CARD_COUNTS:
@@ -75,10 +67,10 @@ static func build_deck() -> Array:
 	return deck
 
 
-func new_game(p_num_words: int, deck: Array = []) -> void:
-	num_words = clampi(p_num_words, MIN_WORDS, max_words_for_deck())
+func new_game(deck: Array = []) -> void:
 	if deck.is_empty():
 		deck = build_deck()
+	num_words = NUM_WORDS
 	scoring = []
 	pools = []
 	backup = []
@@ -99,10 +91,6 @@ func pool_top(lane: int) -> String:
 	return "" if pools[lane].is_empty() else pools[lane].back()
 
 
-func backup_top() -> String:
-	return "" if backup.is_empty() else backup.back()
-
-
 func cards_left() -> int:
 	var n: int = backup.size()
 	for pool in pools:
@@ -110,18 +98,36 @@ func cards_left() -> int:
 	return n
 
 
-func is_over() -> bool:
-	return cards_left() == 0
+func longest_word() -> String:
+	var best := ""
+	for made in words_made:
+		if made.word.length() > best.length():
+			best = made.word
+	return best
 
 
-## Plays the top card of a pool lane (or the backup pile) onto a scoring stack.
+## Plays a card onto the front or end of a word in play.
+## The card is the revealed top of pool `index`, or backup card number `index`.
+## Playing a pool card reveals the next one automatically (the new top of that pool).
 ## Returns {ok, card, word, valid, points}.
-func play(from_backup: bool, pool_lane: int, target: int) -> Dictionary:
-	var source: Array = backup if from_backup else pools[pool_lane]
-	if source.is_empty() or target < 0 or target >= num_words:
+func play(from_backup: bool, index: int, target: int, at_front: bool) -> Dictionary:
+	if target < 0 or target >= num_words:
 		return {"ok": false}
-	var card: String = source.pop_back()
-	scoring[target].append(card)
+	if from_backup:
+		if index < 0 or index >= backup.size():
+			return {"ok": false}
+	elif index < 0 or index >= num_words or pools[index].is_empty():
+		return {"ok": false}
+	var source: Array = backup if from_backup else pools[index]
+	var card: String
+	if from_backup:
+		card = source.pop_at(index)
+	else:
+		card = source.pop_back()
+	if at_front:
+		scoring[target].push_front(card)
+	else:
+		scoring[target].append(card)
 	var word: String = stack_text(scoring[target])
 	var valid := is_word(word)
 	var points := stack_value(scoring[target]) if valid else 0
